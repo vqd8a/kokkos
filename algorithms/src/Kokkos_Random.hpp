@@ -60,6 +60,18 @@ namespace Kokkos {
          static Scalar draw(Generator& gen, const Scalar& start, const Scalar& end);
       };
 
+    Template functions to get normally distributed random numbers from a generator for a specific Scalar type
+      template <class Generator, Scalar>
+      struct normal_rand {
+        //Returns a value normally distributed with mean = 0 and std = 1
+        KOKKOS_INLINE_FUNCTION
+        static Scalar draw(Generator& gen);
+         
+        //Return a value normally distributed with mean = meanVal and std_dev = stdVal
+        KOKKOS_INLINE_FUNCTION
+        static Scalar draw(Generator& gen, const Scalar& meanVal, const Scalar& stdVal);
+      };
+
     The Random number generators themselves have two components a state-pool and the actual generator
     A state-pool manages a number of generators, so that each active thread is able to grep its own.
     This allows the generation of random numbers which are independent between threads. Note that
@@ -195,6 +207,15 @@ namespace Kokkos {
     double normal(const double& mean, const double& std_dev=1.0);
     }
 
+    //Draw a standard normal distributed double
+    KOKKOS_INLINE_FUNCTION
+    float fnormal() ;
+
+    //Draw a normal distributed double with given mean and standard deviation
+    KOKKOS_INLINE_FUNCTION
+    float fnormal(const float& mean, const float& std_dev=1.0);
+    }
+
     //Additional Functions:
 
     //Fills view with random numbers in the range [0,range)
@@ -205,6 +226,12 @@ namespace Kokkos {
     template<class ViewType, class PoolType>
     void fill_random(ViewType view, PoolType pool,
                      ViewType::value_type start, ViewType::value_type end);
+
+    //Fills view with normally distributed random numbers with mean and std_dev
+    template <class ViewType, class RandomPool, class IndexType = int64_t>
+    void fill_random_normal(ViewType a, RandomPool g,
+                            typename ViewType::const_value_type mean,
+                            typename ViewType::const_value_type std_dev);
 
 */
 // clang-format on
@@ -551,6 +578,66 @@ struct rand<Generator, Kokkos::complex<double>> {
   }
 };
 
+template <class Generator, class Scalar>
+struct normal_rand;
+
+template <class Generator>
+struct normal_rand<Generator, float> {
+  KOKKOS_INLINE_FUNCTION
+  static float draw(Generator& gen) { return gen.fnormal(); }
+  KOKKOS_INLINE_FUNCTION
+  static float draw(Generator& gen, const float& mean, const float& std_dev) {
+    return gen.fnormal(mean, std_dev);
+  }
+};
+
+template <class Generator>
+struct normal_rand<Generator, double> {
+  KOKKOS_INLINE_FUNCTION
+  static double draw(Generator& gen) { return gen.normal(); }
+  KOKKOS_INLINE_FUNCTION
+  static double draw(Generator& gen, const double& mean,
+                     const double& std_dev) {
+    return gen.normal(mean, std_dev);
+  }
+};
+
+template <class Generator>
+struct normal_rand<Generator, Kokkos::complex<float>> {
+  KOKKOS_INLINE_FUNCTION
+  static Kokkos::complex<float> draw(Generator& gen) {
+    const float re = gen.fnormal();
+    const float im = gen.fnormal();
+    return Kokkos::complex<float>(re, im);
+  }
+  KOKKOS_INLINE_FUNCTION
+  static Kokkos::complex<float> draw(Generator& gen,
+                                     const Kokkos::complex<float>& mean,
+                                     const Kokkos::complex<float>& std_dev) {
+    const float re = gen.fnormal(real(mean), real(std_dev));
+    const float im = gen.fnormal(imag(mean), imag(std_dev));
+    return Kokkos::complex<float>(re, im);
+  }
+};
+
+template <class Generator>
+struct normal_rand<Generator, Kokkos::complex<double>> {
+  KOKKOS_INLINE_FUNCTION
+  static Kokkos::complex<double> draw(Generator& gen) {
+    const double re = gen.normal();
+    const double im = gen.normal();
+    return Kokkos::complex<double>(re, im);
+  }
+  KOKKOS_INLINE_FUNCTION
+  static Kokkos::complex<double> draw(Generator& gen,
+                                      const Kokkos::complex<double>& mean,
+                                      const Kokkos::complex<double>& std_dev) {
+    const double re = gen.normal(real(mean), real(std_dev));
+    const double im = gen.normal(imag(mean), imag(std_dev));
+    return Kokkos::complex<double>(re, im);
+  }
+};
+
 template <class DeviceType>
 class Random_XorShift1024_Pool;
 
@@ -867,6 +954,23 @@ class Random_XorShift64 {
   double normal(const double& mean, const double& std_dev = 1.0) {
     return mean + normal() * std_dev;
   }
+
+  KOKKOS_INLINE_FUNCTION
+  float fnormal() {
+    double S = 2.0;
+    double U;
+    while (S >= 1.0) {
+      U              = 2.0 * drand() - 1.0;
+      const double V = 2.0 * drand() - 1.0;
+      S              = U * U + V * V;
+    }
+    return static_cast<float>(U * std::sqrt(-2.0 * std::log(S) / S));
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  float fnormal(const float& mean, const float& std_dev = 1.0) {
+    return mean + fnormal() * std_dev;
+  }
 };
 
 template <class DeviceType = Kokkos::DefaultExecutionSpace>
@@ -1109,6 +1213,23 @@ class Random_XorShift1024 {
   KOKKOS_INLINE_FUNCTION
   double normal(const double& mean, const double& std_dev = 1.0) {
     return mean + normal() * std_dev;
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  float fnormal() {
+    double S = 2.0;
+    double U;
+    while (S >= 1.0) {
+      U              = 2.0 * drand() - 1.0;
+      const double V = 2.0 * drand() - 1.0;
+      S              = U * U + V * V;
+    }
+    return static_cast<float>(U * std::sqrt(-2.0 * std::log(S) / S));
+  }
+
+  KOKKOS_INLINE_FUNCTION
+  float fnormal(const float& mean, const float& std_dev = 1.0) {
+    return mean + fnormal() * std_dev;
   }
 };
 
@@ -1518,6 +1639,301 @@ void fill_random(const ExecutionSpace& exec, ViewType a, RandomPool g,
             a, g, begin, end));
 }
 
+template <class ViewType, class RandomPool, int loops, int rank,
+          class IndexType>
+struct fill_random_functor_normal;
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 0, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    a()                                     = Randn::draw(gen, mean, std_dev);
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 1, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0)))
+        a(idx) = Randn::draw(gen, mean, std_dev);
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 2, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType k = 0; k < static_cast<IndexType>(a.extent(1)); k++)
+          a(idx, k) = Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 3, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType k = 0; k < static_cast<IndexType>(a.extent(1)); k++)
+          for (IndexType l = 0; l < static_cast<IndexType>(a.extent(2)); l++)
+            a(idx, k, l) = Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 4, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType k = 0; k < static_cast<IndexType>(a.extent(1)); k++)
+          for (IndexType l = 0; l < static_cast<IndexType>(a.extent(2)); l++)
+            for (IndexType m = 0; m < static_cast<IndexType>(a.extent(3)); m++)
+              a(idx, k, l, m) = Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 5, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType l = 0; l < static_cast<IndexType>(a.extent(1)); l++)
+          for (IndexType m = 0; m < static_cast<IndexType>(a.extent(2)); m++)
+            for (IndexType n = 0; n < static_cast<IndexType>(a.extent(3)); n++)
+              for (IndexType o = 0; o < static_cast<IndexType>(a.extent(4));
+                   o++)
+                a(idx, l, m, n, o) = Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 6, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType k = 0; k < static_cast<IndexType>(a.extent(1)); k++)
+          for (IndexType l = 0; l < static_cast<IndexType>(a.extent(2)); l++)
+            for (IndexType m = 0; m < static_cast<IndexType>(a.extent(3)); m++)
+              for (IndexType n = 0; n < static_cast<IndexType>(a.extent(4));
+                   n++)
+                for (IndexType o = 0; o < static_cast<IndexType>(a.extent(5));
+                     o++)
+                  a(idx, k, l, m, n, o) = Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 7, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType k = 0; k < static_cast<IndexType>(a.extent(1)); k++)
+          for (IndexType l = 0; l < static_cast<IndexType>(a.extent(2)); l++)
+            for (IndexType m = 0; m < static_cast<IndexType>(a.extent(3)); m++)
+              for (IndexType n = 0; n < static_cast<IndexType>(a.extent(4));
+                   n++)
+                for (IndexType o = 0; o < static_cast<IndexType>(a.extent(5));
+                     o++)
+                  for (IndexType p = 0; p < static_cast<IndexType>(a.extent(6));
+                       p++)
+                    a(idx, k, l, m, n, o, p) = Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ViewType, class RandomPool, int loops, class IndexType>
+struct fill_random_functor_normal<ViewType, RandomPool, loops, 8, IndexType> {
+  ViewType a;
+  RandomPool rand_pool;
+  typename ViewType::const_value_type mean, std_dev;
+
+  using Randn = normal_rand<typename RandomPool::generator_type,
+                            typename ViewType::non_const_value_type>;
+
+  fill_random_functor_normal(ViewType a_, RandomPool rand_pool_,
+                             typename ViewType::const_value_type mean_,
+                             typename ViewType::const_value_type std_dev_)
+      : a(a_), rand_pool(rand_pool_), mean(mean_), std_dev(std_dev_) {}
+
+  KOKKOS_INLINE_FUNCTION
+  void operator()(IndexType i) const {
+    typename RandomPool::generator_type gen = rand_pool.get_state();
+    for (IndexType j = 0; j < loops; j++) {
+      const IndexType idx = i * loops + j;
+      if (idx < static_cast<IndexType>(a.extent(0))) {
+        for (IndexType k = 0; k < static_cast<IndexType>(a.extent(1)); k++)
+          for (IndexType l = 0; l < static_cast<IndexType>(a.extent(2)); l++)
+            for (IndexType m = 0; m < static_cast<IndexType>(a.extent(3)); m++)
+              for (IndexType n = 0; n < static_cast<IndexType>(a.extent(4));
+                   n++)
+                for (IndexType o = 0; o < static_cast<IndexType>(a.extent(5));
+                     o++)
+                  for (IndexType p = 0; p < static_cast<IndexType>(a.extent(6));
+                       p++)
+                    for (IndexType q = 0;
+                         q < static_cast<IndexType>(a.extent(7)); q++)
+                      a(idx, k, l, m, n, o, p, q) =
+                          Randn::draw(gen, mean, std_dev);
+      }
+    }
+    rand_pool.free_state(gen);
+  }
+};
+
+template <class ExecutionSpace, class ViewType, class RandomPool,
+          class IndexType = int64_t>
+void fill_random_normal(const ExecutionSpace& exec, ViewType a, RandomPool g,
+                        typename ViewType::const_value_type mean,
+                        typename ViewType::const_value_type std_dev) {
+  int64_t LDA = a.extent(0);
+  if (LDA > 0)
+    parallel_for(
+        "Kokkos::fill_random_normal",
+        Kokkos::RangePolicy<ExecutionSpace>(exec, 0, (LDA + 127) / 128),
+        Impl::fill_random_functor_normal<ViewType, RandomPool, 128,
+                                         ViewType::rank, IndexType>(a, g, mean,
+                                                                    std_dev));
+}
+
 }  // namespace Impl
 
 template <class ExecutionSpace, class ViewType, class RandomPool,
@@ -1548,6 +1964,25 @@ template <class ViewType, class RandomPool, class IndexType = int64_t>
 void fill_random(ViewType a, RandomPool g,
                  typename ViewType::const_value_type range) {
   fill_random(typename ViewType::execution_space{}, a, g, 0, range);
+}
+
+template <class ExecutionSpace, class ViewType, class RandomPool,
+          class IndexType = int64_t>
+void fill_random_normal(const ExecutionSpace& exec, ViewType a, RandomPool g,
+                        typename ViewType::const_value_type mean,
+                        typename ViewType::const_value_type std_dev) {
+  Impl::apply_to_view_of_static_rank(
+      [&](auto dst) {
+        Kokkos::Impl::fill_random_normal(exec, dst, g, mean, std_dev);
+      },
+      a);
+}
+
+template <class ViewType, class RandomPool, class IndexType = int64_t>
+void fill_random_normal(ViewType a, RandomPool g,
+                        typename ViewType::const_value_type mean,
+                        typename ViewType::const_value_type std_dev) {
+  fill_random_normal(typename ViewType::execution_space{}, a, g, mean, std_dev);
 }
 
 }  // namespace Kokkos
